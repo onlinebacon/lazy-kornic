@@ -1,88 +1,55 @@
 import ShaderRenderer from './shader-renderer.js';
 
+const max = 25;
+const nSlices = 8;
+const iterations = 60;
+const shrinkFactor = 0.75;
+
 const calcRatio = (m1, m2) => Math.pow(10, -0.4*(m1 - m2));
-const calcTot = (m1, m2) => -2.5*Math.log10(
-	Math.pow(10, -0.4*m1) +
-	Math.pow(10, -0.4*m2)
+const calcTotal = (m1, m2) => -2.5*Math.log10(
+	+ Math.pow(10, -0.4*m1)
+	+ Math.pow(10, -0.4*m2)
 );
 
-let f1 = 1000;
-let f2 = 1000;
-let ratio = 0;
-let total = 0;
-
-const update = () => {
-	renderer.render();
+const solveFor = (ratio, total) => {
+	const mid = max/2;
+	let range = max;
+	const calcRatioError = (m1, m2) => {
+		const dif = ratio - calcRatio(m1, m2);
+		return dif*dif;
+	};
+	const calcTotalError = (m1, m2) => {
+		const dif = total - calcTotal(m1, m2);
+		return dif*dif;
+	};
+	const calcBothErrors = (m1, m2) => {
+		return calcRatioError(m1, m2) + calcTotalError(m1, m2);
+	};
+	const minimize = (target, calcError) => {
+		const [ m1, m2 ] = target;
+		const a = range/nSlices;
+		const b = a/2 - range/2;
+		let error = calcError(m1, m2);
+		for (let i1=0; i1<nSlices; ++i1) {
+			const t1 = m1 + i1*a + b;
+			for (let i2=0; i2<nSlices; ++i2) {
+				const t2 = m2 + i2*a + b;
+				const e = calcError(t1, t2);
+				if (e < error) {
+					target[0] = t1;
+					target[1] = t2;
+					error = e;
+				}
+			}
+		}
+	};
+	const target = [ mid, mid ];
+	for (let i=0; i<iterations; ++i) {
+		minimize(target, calcBothErrors);
+		range *= shrinkFactor;
+	}
+	return target;
 };
-
-const addRange = ({ label, min, max, step, init, onchange }) => {
-	const div = document.createElement('div');
-	div.innerHTML += `<div class="label">${label}: </div>`;
-	const input = document.createElement('input');
-	input.setAttribute('type', 'range');
-	input.setAttribute('min', min);
-	input.setAttribute('max', max);
-	input.setAttribute('step', step);
-	div.appendChild(input);
-	document.body.appendChild(div);
-	const view = document.createElement('span');
-	div.appendChild(view);
-	input.addEventListener('input', () => {
-		onchange(input.value*1);
-		view.innerText = (input.value*1).toFixed(3)*1;
-	});
-	input.value = init;
-};
-
-const toAlpha = x => Math.round(Math.min(255, Math.max(0, x)));
-const shader = (ax, ay, bx, by) => {
-	const cx = (ax + bx)/2;
-	const cy = (ay + by)/2;
-	const e1 = calcRatio(cx, cy) - ratio;
-	const e2 = calcTot(cx, cy) - total;
-	return `rgb(${
-		toAlpha(Math.sqrt(f1/(e1*e1)/100))
-	}, ${
-		toAlpha(Math.sqrt(f2/(e2*e2)/100))
-	}, 255)`;
-};
-
-const renderer = new ShaderRenderer({
-	canvas: document.querySelector('canvas'),
-	shader,
-	minInterval: 100,
-	box: [0, 0, 25, 25],
-});
-
-addRange({
-	label: 'Ratio brightness',
-	min: 0,
-	max: 20,
-	step: 0.01,
-	init: Math.log(f1),
-	onchange: val => {
-		f1 = Math.exp(val) - 1;
-		update();
-	},
-});
-addRange({
-	label: 'Tot brightness',
-	min: 0,
-	max: 20,
-	step: 0.01,
-	init: Math.log(f2),
-	onchange: val => {
-		f2 = Math.exp(val) - 1;
-		update();
-	},
-});
-
-renderer.canvas.addEventListener('mousemove', e => {
-	const x = e.offsetX;
-	const y = e.offsetY;
-	const val = renderer.pxToVal(x, y).map(v => v.toFixed(1)*1).join(' ');
-	document.querySelector('#coord').innerText = val;
-});
 
 const loadInput = (name, onchange) => {
 	const input = document.querySelector(`[placeholder="${name}"]`);
@@ -91,12 +58,20 @@ const loadInput = (name, onchange) => {
 	});
 };
 
+let ratio, total;
+const update = () => {
+	const res = solveFor(ratio, total);
+	const [ m1, m2 ] = res.map(v => v.toFixed(6)*1);
+	const text = `m1 = ${m1}, m2 = ${m2}`;
+	document.querySelector('#result').innerText = text;
+};
+
 loadInput('ratio', value => {
 	ratio = Number(value);
-	update();
+	if (total != null) update();
 });
 
 loadInput('total', value => {
 	total = Number(value);
-	update();
+	if (ratio != null) update();
 });
